@@ -2,8 +2,8 @@ use crate::Result;
 use std::collections::HashMap;
 use std::str::FromStr;
 
-#[derive(Debug)]
-pub enum HttpRequestMethod {
+#[derive(Debug, PartialEq)]
+pub enum RequestMethod {
     GET,
     POST,
     PUT,
@@ -16,18 +16,18 @@ pub enum HttpRequestMethod {
 }
 
 #[derive(Debug)]
-pub struct HttpRequestMethodParseError;
+pub struct RequestMethodParseError;
 
-impl std::fmt::Display for HttpRequestMethodParseError {
+impl std::fmt::Display for RequestMethodParseError {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         write!(f, "invalid HTTP request method")
     }
 }
 
-impl std::error::Error for HttpRequestMethodParseError {}
+impl std::error::Error for RequestMethodParseError {}
 
-impl FromStr for HttpRequestMethod {
-    type Err = HttpRequestMethodParseError;
+impl FromStr for RequestMethod {
+    type Err = RequestMethodParseError;
 
     fn from_str(s: &str) -> std::result::Result<Self, Self::Err> {
         match s {
@@ -40,22 +40,22 @@ impl FromStr for HttpRequestMethod {
             "OPTIONS" => Ok(Self::OPTIONS),
             "TRACE" => Ok(Self::TRACE),
             "PATCH" => Ok(Self::PATCH),
-            _ => Err(HttpRequestMethodParseError),
+            _ => Err(RequestMethodParseError),
         }
     }
 }
 
 #[derive(Debug)]
-pub struct HttpRequest {
-    method: HttpRequestMethod,
-    path: String,
+pub struct Request {
+    pub method: RequestMethod,
+    pub path: String,
     version: String,
     headers: HashMap<String, String>,
     body: Option<Vec<u8>>,
 }
 
-impl HttpRequest {
-    pub fn new(raw: &[u8]) -> Result<HttpRequest> {
+impl Request {
+    pub fn new(raw: &[u8]) -> Result<Request> {
         let mut lines = raw.split(|byte| *byte == '\n' as u8);
 
         // Parse status line
@@ -66,7 +66,7 @@ impl HttpRequest {
             .split(|byte| *byte == ' ' as u8);
         let method_raw = status_line.next().ok_or("no method provided")?;
         let method_str = std::str::from_utf8(method_raw)?;
-        let method = HttpRequestMethod::from_str(method_str)?;
+        let method = RequestMethod::from_str(method_str)?;
         let path_raw = status_line.next().ok_or("no path provided")?;
         let path = std::str::from_utf8(path_raw)?.to_string();
         let version_raw = status_line.next().ok_or("no HTTP version provided")?;
@@ -99,7 +99,7 @@ impl HttpRequest {
             None
         };
 
-        Ok(HttpRequest {
+        Ok(Request {
             method: method,
             path: path,
             version: version,
@@ -109,12 +109,59 @@ impl HttpRequest {
     }
 }
 
-pub enum HttpResponseStatus {
-    OK,
+// #[derive(Debug)]
+// pub struct ResponseStatusError;
+//
+// impl std::fmt::Display for ResponseStatusError {
+//     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+//         write!(f, "invalid HTTP response status")
+//     }
+// }
+//
+// impl std::error::Error for ResponseStatusError {}
+//
+// pub enum ResponseStatus {
+//     OK,
+// }
+//
+// impl ResponseStatus {
+//     pub fn from_code(code: usize) -> Result<ResponseStatus> {
+//         match code {
+//             200 => Ok(ResponseStatus::OK),
+//             _ => Err(ResponseStatusError.into()),
+//         }
+//     }
+// }
+
+pub struct Response {
+    status: String,
+    headers: HashMap<String, String>,
+    body: Option<Vec<u8>>,
 }
 
-pub struct HttpResponse {
-    status: HttpResponseStatus,
-    headers: HashMap<String, String>,
-    body: Option<String>,
+impl Response {
+    pub fn new(
+        status: String,
+        headers: HashMap<String, String>,
+        body: Option<Vec<u8>>,
+    ) -> Response {
+        Response {
+            status,
+            headers,
+            body,
+        }
+    }
+
+    pub fn into_bytes(self) -> Vec<u8> {
+        let mut response_str = String::from(format!("HTTP/1.1 {}\r\n", self.status));
+        for (key, value) in self.headers {
+            response_str.push_str(format!("{}: {}\r\n", key, value).as_str());
+        }
+        response_str.push_str("\r\n");
+        let mut bytes = response_str.into_bytes();
+        if self.body.is_some() {
+            bytes.append(&mut self.body.unwrap());
+        }
+        bytes
+    }
 }

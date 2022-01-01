@@ -1,9 +1,13 @@
+use std::collections::HashMap;
+use std::fs;
+use std::path::Path;
 use tokio::io::AsyncWriteExt;
 use tokio::net::{TcpListener, TcpStream};
 
 mod http;
 
 const HOST: &str = "127.0.0.1:8080";
+const BASE_DIR: &str = ".";
 
 type Result<T> = std::result::Result<T, Box<dyn std::error::Error>>;
 
@@ -16,40 +20,87 @@ async fn main() -> Result<()> {
     loop {
         let (stream, addr) = server.accept().await?;
         tokio::spawn(async move {
-            println!("Got request from: {}", addr);
             let _ = handle_connection(stream).await;
         });
     }
 }
 
-const RESPONSE: &str = "HTTP/1.1 200 OK\n\
-                        Content-Type: application/json; charset=utf-8\n\
-                        Content-Length: 75\n\
-                        Connection: close\n\
-                        \n\
-                        {\n\
-                        \"userId\": 1,\n\
-                        \"id\": 1,\n\
-                        \"title\": \"delectus aut autem\",\n\
-                        \"completed\": false\n\
-                        }";
-
 async fn handle_connection(mut stream: TcpStream) -> Result<()> {
     // TODO: If request is bad, send error message instead of closing
+    // TODO: Log request
+    // TODO: Handle range header
+    // TODO: Send date
+
     stream.readable().await?;
     let mut buf = [0; 8192]; // Apparently this is the standard size for most HTTP servers
     stream.try_read(&mut buf)?;
 
-    println!("Parsing request ...");
-    let trimmed = buf.split(|byte| *byte == 0).next().ok_or("could not trim request")?;
-    let request = http::HttpRequest::new(trimmed)?;
+    let trimmed = buf
+        .split(|byte| *byte == 0)
+        .next()
+        .ok_or("could not trim request")?;
+    let request = http::Request::new(trimmed)?;
 
-    println!("REQUEST DATA:\n{:?}", request);
+
     // Only accept GET request
-    // Handle range header
-    // Send date
+    if request.method != http::RequestMethod::GET {
+        stream
+            .write(
+                &http::Response::new(
+                    "405 Method Not Allowed".to_string(),
+                    HashMap::from([
+                        ("Connection".into(), "close".into()),
+                        ("Content-Length".into(), "0".into()),
+                    ]),
+                    None,
+                )
+                .into_bytes(),
+            )
+            .await?;
+        stream.shutdown().await?;
+        return Ok(());
+    }
 
-    stream.write(RESPONSE.as_bytes()).await?;
+    // TODO: Read BASE_DIR + request.path as bytes then send that
+    let file_raw = match fs::read(BASE_DIR.to_string() + &request.path) {
+        Ok(bytes) => bytes,
+        Err(_) => {
+            // 404 Error
+            let res = stream
+                .write(
+                    &http::Response::new(
+                        "404 Not Found".into(),
+                        HashMap::from([
+                            ("Connection".into(), "close".into()),
+                            ("Content-Length".into(), "0".into()),
+                        ]),
+                        None,
+                    )
+                    .into_bytes(),
+                )
+                .await;
+            if res.is_err() {
+                return Err(res.unwrap_err().into());
+            }
+            let res = stream.shutdown().await;
+            if res.is_err() {
+                return Err(res.unwrap_err().into());
+            }
+            return Ok(());
+        }
+    };
+
+    let response = http::Response::new(
+        "200 Ok".to_string(),
+        HashMap::from([
+            ("Content-Type".into(), "text/html; charset=UTF-8".into()),
+            ("Content-Length".into(), file_raw.len().to_string()),
+            ("Connection".to_string(), "close".to_string()),
+        ]),
+        Some(file_raw),
+    );
+
+    stream.write(&response.into_bytes()).await?;
     stream.shutdown().await?;
     Ok(())
 }

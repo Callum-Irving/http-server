@@ -60,7 +60,6 @@ impl HttpRequest {
 
         // Parse status line
         // TODO: Remove \r
-        println!("Parsing status line ...");
         let mut status_line = lines
             .next()
             .ok_or("could not read status line")?
@@ -74,7 +73,6 @@ impl HttpRequest {
         let version = std::str::from_utf8(version_raw)?.to_string();
 
         // Parse headers
-        println!("Parsing headers ...");
         let mut headers = HashMap::new();
         while let Some(line) = lines.next() {
             let line = if line.last() == Some(&13) {
@@ -85,7 +83,6 @@ impl HttpRequest {
             if line == [] {
                 break;
             }
-            println!("HEADER LINE: {:?}", line);
             let mut v = line.split(|byte| *byte == ':' as u8);
             let key_raw = v.next().ok_or("no key provided")?;
             let key = std::str::from_utf8(key_raw)?.to_string();
@@ -95,7 +92,6 @@ impl HttpRequest {
         }
 
         // Parse body
-        println!("Parsing body ...");
         let mut lines = lines.peekable();
         let body = if lines.peek().is_some() {
             Some(lines.collect::<Vec<&[u8]>>().join(&('\n' as u8)))
